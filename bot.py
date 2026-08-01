@@ -4,8 +4,8 @@ from pykrx import stock
 from datetime import datetime, timedelta
 
 # 1. 텔레그램 설정
-bot_token = "여기에_API_토큰을_넣으세요"
-chat_id = "여기에_Chat_ID를_넣으세요"
+bot_token = "8884687082:AAEYg_SXp40-QQPIxQGGcBkrltaXPCMjims"
+chat_id = "7495180649"
 
 # 2. 날짜 설정 (가장 최근 평일 찾기)
 today = datetime.today()
