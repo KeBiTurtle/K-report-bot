@@ -3,22 +3,21 @@ import FinanceDataReader as fdr
 from pykrx import stock
 from datetime import datetime, timedelta
 
-# 1. 텔레그램 설정 (본인 정보 유지)
+# 1. 텔레그램 설정
 bot_token = "여기에_API_토큰을_넣으세요"
 chat_id = "여기에_Chat_ID를_넣으세요"
 
-# 2. 날짜 계산 (주말이면 금요일 날짜로 변경)
+# 2. 날짜 설정 (가장 최근 평일 찾기)
 today = datetime.today()
-if today.weekday() == 5:  # 토요일이면
+if today.weekday() == 5:  # 토요일
     target_date = today - timedelta(days=1)
-elif today.weekday() == 6:  # 일요일이면
+elif today.weekday() == 6:  # 일요일 (오늘)
     target_date = today - timedelta(days=2)
 else:
     target_date = today
 
-# fdr용 날짜 포맷 (YYYY-MM-DD), pykrx용 날짜 포맷 (YYYYMMDD)
-fdr_date = target_date.strftime('%Y-%m-%d')
-krx_date = target_date.strftime('%Y%m%d')
+fdr_date = target_date.strftime('%Y-%m-%d') # 예: 2026-07-31
+krx_date = target_date.strftime('%Y%m%d')   # 예: 20260731
 
 # 3. 주식 지수 가져오기
 def get_index_close(ticker, date_str):
@@ -36,35 +35,32 @@ kosdaq = get_index_close('KQ11', fdr_date)
 nasdaq = get_index_close('IXIC', fdr_date)
 sp500 = get_index_close('US500', fdr_date)
 
-# 4. 수급 데이터 가져오기 (pykrx 함수 변경)
+# 4. 수급 데이터 가져오기 (가장 안정적인 함수 사용)
 def get_trading_volume(ticker, date_str):
     try:
-        # 순매수 대금 함수 사용 (단위가 직관적임)
-        # 인자: 시작일, 종료일, 시장(KOSPI), 투자자(전체 조회는 별도 처리 필요)
-        
-        # 보다 직관적이고 오류가 적은 종목별 외국인/기관 합산 데이터 조회로 변경
-        df = stock.get_market_trading_volume_by_investor(date_str, date_str, ticker)
+        # 이 함수는 해당 일자의 종목별 투자자 순매수 '거래량'을 데이터프레임으로 반환합니다.
+        # 인덱스가 투자자(개인, 외국인, 기관합계 등)로 되어 있습니다.
+        df = stock.get_market_net_purchases_of_equities_by_investor(date_str, date_str, "KOSPI", ticker)
         
         if not df.empty:
-            # 최신 pykrx 버전에 맞춘 데이터 추출 방식 (iloc 활용)
-            # 첫 번째 행(해당 날짜)의 개인(0), 기관합계(2), 외국인(5) 컬럼 인덱스 접근 
-            # (주의: 컬럼 순서는 pykrx 버전에 따라 다를 수 있어 인덱스 이름으로 접근하는 것이 안전)
+            # 인덱스(투자자명)를 기준으로 '순매수거래량' 값을 가져옵니다.
+            # 만약 해당 투자자 데이터가 없으면 0으로 처리합니다.
+            retail = df.loc['개인', '순매수거래량'] if '개인' in df.index else 0
+            inst = df.loc['기관합계', '순매수거래량'] if '기관합계' in df.index else 0
+            foreigner = df.loc['외국인', '순매수거래량'] if '외국인' in df.index else 0
             
-            # 투자자 이름을 인덱스로 사용하여 안전하게 접근
-            retail = df.loc[date_str, '개인'] if '개인' in df.columns else df.iloc[0, 0]
-            inst = df.loc[date_str, '기관합계'] if '기관합계' in df.columns else df.iloc[0, 2]
-            foreigner = df.loc[date_str, '외국인'] if '외국인' in df.columns else df.iloc[0, 5]
-            
-            return f"개인: {int(retail):,}주 | 기관: {int(inst):,}주 | 외인: {int(foreigner):,}주"
+            # 가독성을 위해 만 단위(천 단위 콤마)로 표시하거나 직관적인 숫자로 포맷팅합니다.
+            return f"개인: {retail:,}주 | 기관: {inst:,}주 | 외인: {foreigner:,}주"
         else:
             return "수급 데이터 없음"
     except Exception as e:
-        return f"오류 발생"
+         # 에러 발생 시 어떤 에러인지 텔레그램으로 받아볼 수 있게 합니다.
+        return f"에러: {e}"
 
 samsung_vol = get_trading_volume("005930", krx_date)
 hynix_vol = get_trading_volume("000660", krx_date)
 
-# 5. 메시지 조립
+# 5. 브리핑 메시지 조립
 message = f"""
 📊 주식 시장 브리핑 (기준일: {fdr_date})
 
@@ -76,12 +72,12 @@ message = f"""
 - 나스닥: {nasdaq}
 - S&P 500: {sp500}
 
-🏢 [주요 종목 수급 (단위: 주)]
+🏢 [주요 종목 순매수 수급 (단위: 주)]
 - 삼성전자: {samsung_vol}
 - SK하이닉스: {hynix_vol}
 """
 
-# 6. 전송
+# 6. 텔레그램으로 전송
 url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
 payload = {'chat_id': chat_id, 'text': message}
 requests.post(url, data=payload)
